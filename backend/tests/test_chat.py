@@ -7,10 +7,12 @@ from unittest.mock import MagicMock, Mock
 
 import httpx
 import pytest
+from pydantic import ValidationError
 
 from app.api.routes import chat as chat_route
 from app.core.config import settings
 from app.main import app
+from app.schemas.chat import ChatHistoryTurn, ChatRequest
 from app.services import gemini_chat
 
 
@@ -29,12 +31,14 @@ def test_chat_returns_mocked_provider_response(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(chat_route, "settings", configured)
     monkeypatch.setattr(chat_route, "generate_gemini_reply", generate)
 
-    response = post_chat({"message": "Hello"})
+    response = post_chat({"message": "Hello", "history": []})
 
     assert response.status_code == 200
     assert response.json() == {"response": "A mocked answer."}
     generate.assert_called_once_with(
         "Hello",
+        history=[],
+        document_context=[],
         api_key="test-key",
         model="test-model",
         timeout_seconds=configured.gemini_timeout_seconds,
@@ -159,7 +163,65 @@ def test_sdk_adapter_uses_configured_model_and_timeout(monkeypatch: pytest.Monke
     assert client_factory.call_args.kwargs["api_key"] == "test-key"
     assert client_factory.call_args.kwargs["http_options"].timeout == 12000
     assert client_factory.call_args.kwargs["http_options"].retry_options.attempts == 1
-    client.models.generate_content.assert_called_once_with(model="test-model", contents="Hello")
+    client.models.generate_content.assert_called_once_with(
+        model="test-model",
+        contents=[gemini_chat.types.Content(
+            role="user", parts=[gemini_chat.types.Part(text="Hello")]
+        )],
+    )
+
+
+def test_sdk_adapter_preserves_history_order_and_maps_roles(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = MagicMock()
+    client.__enter__.return_value = client
+    client.models.generate_content.return_value = SimpleNamespace(text="Follow-up answer")
+    monkeypatch.setattr(gemini_chat.genai, "Client", Mock(return_value=client))
+    history = [
+        ChatHistoryTurn(role="user", content="First user turn"),
+        ChatHistoryTurn(role="assistant", content="First assistant answer"),
+        ChatHistoryTurn(role="user", content="Second user turn"),
+    ]
+
+    gemini_chat.generate_gemini_reply(
+        "Current user turn", history=history, api_key="test-key", model="test-model",
+        timeout_seconds=10,
+    )
+
+    submitted = client.models.generate_content.call_args.kwargs["contents"]
+    assert [(turn.role, turn.parts[0].text) for turn in submitted] == [
+        ("user", "First user turn"),
+        ("model", "First assistant answer"),
+        ("user", "Second user turn"),
+        ("user", "Current user turn"),
+    ]
+
+
+def test_chat_request_accepts_empty_history() -> None:
+    request = ChatRequest(message="Hello", history=[])
+
+    assert request.history == []
+
+
+def test_chat_request_rejects_invalid_history_role() -> None:
+    with pytest.raises(ValidationError):
+        ChatRequest.model_validate({
+            "message": "Hello",
+            "history": [{"role": "system", "content": "You are a system"}],
+        })
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"message": "x" * 8001},
+        {"message": "Hello", "history": [{"role": "user", "content": "x" * 8001}]},
+        {"message": "Hello", "history": [{"role": "assistant", "content": "   "}]},
+        {"message": "Hello", "history": [{"role": "user", "content": "turn"}] * 21},
+    ],
+)
+def test_chat_request_enforces_message_and_history_limits(payload: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        ChatRequest.model_validate(payload)
 
 
 @pytest.mark.parametrize(

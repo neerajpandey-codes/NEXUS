@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
-import { MessageSquare, Plus, Search, X } from 'lucide-react'
+import { MessageSquare, Pencil, Plus, Search, Trash2, X } from 'lucide-react'
 import GlassCard from '../ui/GlassCard.jsx'
 
-export default function ChatHistoryPanel({ conversations, activeId, onSelect, onNewChat, onClose, mobile = false }) {
+export default function ChatHistoryPanel({ conversations, activeId, onSelect, onNewChat, onRename, onDelete, onClose, mobile = false }) {
   const [query, setQuery] = useState('')
   const visibleConversations = conversations.filter((conversation) => conversation.title.toLowerCase().includes(query.toLowerCase()))
 
@@ -25,14 +25,20 @@ export default function ChatHistoryPanel({ conversations, activeId, onSelect, on
           const active = conversation.id === activeId
           const lastMessage = conversation.messages.at(-1)?.content ?? 'Start a new conversation'
           return (
-            <motion.button key={conversation.id} type="button" layout whileHover={{ x: 2 }} whileTap={{ scale: 0.99 }} onClick={() => { onSelect(conversation.id); onClose?.() }} className={`w-full min-h-11 rounded-xl px-3 py-3 text-left transition ${active ? 'border border-white/[0.07] bg-white/[0.055]' : 'border border-transparent hover:bg-white/[0.035]'}`}>
-              <span className="flex items-start gap-2.5"><MessageSquare size={13} className={`mt-0.5 shrink-0 ${active ? 'text-nexus-cyan' : 'text-slate-600'}`} /><span className="min-w-0 flex-1"><span className={`block truncate text-[11px] font-medium ${active ? 'text-slate-100' : 'text-slate-400'}`}>{conversation.title}</span><span className="mt-1 block truncate text-[10px] text-slate-600">{lastMessage}</span><span className="mt-2 block text-[9px] text-slate-700">{conversation.updated}</span></span></span>
-            </motion.button>
+            <motion.div key={conversation.id} layout whileHover={{ x: 2 }} className="group relative">
+              <button type="button" onClick={() => { onSelect(conversation.id); onClose?.() }} className={`w-full min-h-11 rounded-xl py-3 pl-3 pr-[4.75rem] text-left transition ${active ? 'border border-white/[0.07] bg-white/[0.055]' : 'border border-transparent hover:bg-white/[0.035]'}`}>
+                <span className="flex items-start gap-2.5"><MessageSquare size={13} className={`mt-0.5 shrink-0 ${active ? 'text-nexus-cyan' : 'text-slate-600'}`} /><span className="min-w-0 flex-1"><span className={`block truncate text-[11px] font-medium ${active ? 'text-slate-100' : 'text-slate-400'}`}>{conversation.title}</span><span className="mt-1 block truncate text-[10px] text-slate-600">{lastMessage}</span><span className="mt-2 block text-[9px] text-slate-700">{conversation.updated}</span></span></span>
+              </button>
+              <div className="absolute right-1.5 top-1.5 flex gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
+                <button type="button" onClick={() => onRename(conversation.id)} aria-label={`Rename ${conversation.title}`} title="Rename conversation" className="grid h-9 w-9 place-items-center rounded-lg bg-[#101322] text-slate-500 hover:text-nexus-cyan focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-nexus-cyan/50"><Pencil size={13} /></button>
+                <button type="button" onClick={() => onDelete(conversation.id)} aria-label={`Delete ${conversation.title}`} title="Delete conversation" className="grid h-9 w-9 place-items-center rounded-lg bg-[#101322] text-slate-500 hover:text-rose-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300/50"><Trash2 size={13} /></button>
+              </div>
+            </motion.div>
           )
         })}
         {visibleConversations.length === 0 && <p className="px-3 py-5 text-center text-[10px] text-slate-600">No matching conversations</p>}
       </div>
-      <div className="border-t border-white/[0.06] px-4 py-3 text-[9px] leading-4 text-slate-600">Chat history is stored in this browser session only.</div>
+      <div className="border-t border-white/[0.06] px-4 py-3 text-[9px] leading-4 text-slate-600">Chat history is saved in this browser.</div>
     </GlassCard>
   )
 }

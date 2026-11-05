@@ -26,6 +26,8 @@ def post_chat(request: ChatRequest) -> ChatResponse:
     try:
         response_text = generate_gemini_reply(
             request.message,
+            history=request.history,
+            document_context=request.document_context,
             api_key=api_key,
             model=settings.gemini_model,
             timeout_seconds=settings.gemini_timeout_seconds,

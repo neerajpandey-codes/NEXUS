@@ -20,7 +20,10 @@ export async function fetchBackendHealth({ signal } = {}) {
   return health
 }
 
-export async function sendChatMessage(message, { signal, timeoutMs = 60_000 } = {}) {
+export async function sendChatMessage(
+  message,
+  { history = [], documentContext = [], signal, timeoutMs = 60_000 } = {},
+) {
   const controller = new AbortController()
   let timedOut = false
   const abortFromCaller = () => controller.abort(signal?.reason)
@@ -40,7 +43,7 @@ export async function sendChatMessage(message, { signal, timeoutMs = 60_000 } = 
           Accept: 'application/json',
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ message }),
+        body: JSON.stringify({ message, history, document_context: documentContext }),
         signal: controller.signal,
       })
     } catch (error) {
@@ -66,6 +69,12 @@ export async function sendChatMessage(message, { signal, timeoutMs = 60_000 } = 
         const providerStatus = Number.isInteger(detail.provider_status) ? ` (HTTP ${detail.provider_status})` : ''
         if (message) throw new Error(`${category ? `${category}${providerStatus}: ` : ''}${message}`)
       }
+      if (Array.isArray(detail)) {
+        const messages = detail
+          .map((item) => typeof item?.msg === 'string' ? item.msg.replace(/^Value error, /, '') : '')
+          .filter(Boolean)
+        if (messages.length) throw new Error(messages.join(' '))
+      }
       if (response.status === 422) throw new Error('Please enter a message of 8,000 characters or fewer.')
       throw new Error('NEXUS could not get a response right now. Please try again.')
     }
@@ -78,4 +87,69 @@ export async function sendChatMessage(message, { signal, timeoutMs = 60_000 } = 
     clearTimeout(timeoutId)
     signal?.removeEventListener('abort', abortFromCaller)
   }
+}
+
+export function uploadPdf(file, { signal, onProgress, timeoutMs = 120_000 } = {}) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('The upload was cancelled.', 'AbortError'))
+      return
+    }
+
+    const request = new XMLHttpRequest()
+    const formData = new FormData()
+    formData.append('file', file)
+    request.open('POST', `${apiBaseUrl}/api/documents/extract`)
+    request.timeout = timeoutMs
+
+    const cleanup = () => signal?.removeEventListener('abort', abortRequest)
+    const abortRequest = () => request.abort()
+
+    request.upload.onprogress = (event) => {
+      if (event.lengthComputable) onProgress?.(Math.min(100, Math.round((event.loaded / event.total) * 100)))
+    }
+    request.onload = () => {
+      cleanup()
+      let result
+      try {
+        result = JSON.parse(request.responseText)
+      } catch {
+        reject(new Error('The NEXUS backend returned an unreadable upload response.'))
+        return
+      }
+      if (request.status < 200 || request.status >= 300) {
+        const detail = typeof result.detail === 'string' ? result.detail : ''
+        reject(new Error(detail || 'NEXUS could not process this PDF. Please try another file.'))
+        return
+      }
+      if (
+        typeof result.document_id !== 'string'
+        || typeof result.extracted_text !== 'string'
+        || !Number.isInteger(result.page_count)
+      ) {
+        reject(new Error('The NEXUS backend returned incomplete PDF information.'))
+        return
+      }
+      resolve(result)
+    }
+    request.onerror = () => {
+      cleanup()
+      reject(new Error('Could not reach the NEXUS backend to upload this PDF.'))
+    }
+    request.ontimeout = () => {
+      cleanup()
+      reject(new Error('PDF extraction took too long. Please try again.'))
+    }
+    request.onabort = () => {
+      cleanup()
+      reject(new DOMException('The upload was cancelled.', 'AbortError'))
+    }
+    signal?.addEventListener('abort', abortRequest, { once: true })
+    try {
+      request.send(formData)
+    } catch {
+      cleanup()
+      reject(new Error('The PDF upload could not be started.'))
+    }
+  })
 }

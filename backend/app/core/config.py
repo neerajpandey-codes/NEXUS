@@ -28,6 +28,12 @@ class Settings:
     gemini_retry_base_delay_seconds: float = max(
         0.0, float(os.getenv("GEMINI_RETRY_BASE_DELAY_SECONDS", "1"))
     )
+    pdf_max_extracted_characters: int = max(
+        1, int(os.getenv("PDF_MAX_EXTRACTED_CHARACTERS", "100000"))
+    )
+    gemini_max_document_context_characters: int = max(
+        1, int(os.getenv("GEMINI_MAX_DOCUMENT_CONTEXT_CHARACTERS", "150000"))
+    )
 
 
 settings = Settings()
